@@ -135,11 +135,12 @@
             item.media_count > 1 ? h('span', null, ' · ' + item.media_count + ' kuvaa') : null),
           h('h3', null, h('button', { type: 'button', class: 'news-open', onclick: function () { go({ news: item.id }) } }, item.title)),
           h('p', { class: 'news-summary' }, item.short_description),
-          tagList(item.tags, function (next) { go({ tag: next }) }),
-          h('div', { class: 'news-card-actions' },
-            h('button', { type: 'button', class: 'news-small', 'aria-label': 'Muokkaa: ' + item.title, onclick: function () { go({ news: item.id, view: 'edit' }) } }, 'Muokkaa'),
-            // Deleted from the list, the list is drawn again for the same address.
-            deleteButton(item, true, function () { render(params) })))))
+          tagList(item.tags, function (next) { go({ tag: next }) })),
+        // Beside the body, so on a phone the buttons can use the card's whole width.
+        h('div', { class: 'news-card-actions' },
+          h('button', { type: 'button', class: 'news-small', 'aria-label': 'Muokkaa: ' + item.title, onclick: function () { go({ news: item.id, view: 'edit' }) } }, 'Muokkaa'),
+          // Deleted from the list, the list is drawn again for the same address.
+          deleteButton(item, true, function () { render(params) }))))
     }))
     append(page, cards)
 
