@@ -68,9 +68,9 @@ DEMO_NEWS = [
     {
         "hours_ago": 24 * 4,
         "title": "Uusi asentaja aloitti tiimissämme",
-        "short_description": "LVI-asentaja Mikko Virtanen vahvistaa tiimiä Tampereen alueella lokakuusta alkaen.",
+        "short_description": "Uusi LVI-asentaja vahvistaa tiimiä Tampereen alueella lokakuusta alkaen.",
         "content": (
-            "<p>Mikolla on yli kymmenen vuoden kokemus putki- ja lämmitystöistä. Hän hoitaa jatkossa "
+            "<p>Uudella asentajallamme on yli kymmenen vuoden kokemus putki- ja lämmitystöistä. Hän hoitaa jatkossa "
             "erityisesti Tampereen ja Pirkkalan kohteiden <em>LVI-huoltopyynnöt</em>.</p>"
             "<blockquote>Odotan innolla, että pääsen tutustumaan kohteisiin ja asukkaisiin.</blockquote>"
         ),
