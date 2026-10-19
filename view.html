@@ -1,0 +1,18 @@
+<!--
+  The news module's page. JalaOps shows it in a sandboxed frame with its base
+  styles and colours, assets/news.css and assets/news.js, and a bridge:
+
+  - jalaops.run(input) runs main.py and resolves with its output.
+  - jalaops.params are the page address's parameters (?news=3), and
+    jalaops.navigate(params) changes them, so each page (the list, a news
+    item, the form) has an address of its own and the back button works.
+    A "jalaops:params" event tells when they change.
+
+  news.js draws the pages into #news.
+-->
+<div id="news" class="news"></div>
+<p id="news-error" class="error" role="alert" hidden></p>
+
+<script>
+  NewsApp.start(document.getElementById('news'), document.getElementById('news-error'))
+</script>

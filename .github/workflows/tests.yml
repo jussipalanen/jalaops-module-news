@@ -1,0 +1,22 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        # 3.13 is the Python in the JalaOps Docker images (Debian).
+        python: ['3.13', '3.14']
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python }}
+      - run: python -m unittest -v
+      - name: Check module.json
+        run: python -c "import json; json.load(open('module.json')); json.load(open('composer.json'))"

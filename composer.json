@@ -1,0 +1,6 @@
+{
+    "name": "jalaops/news",
+    "description": "JalaOps module: a news feed with tags and images, and the newest news on the dashboard.",
+    "type": "jalaops-module",
+    "license": "MIT"
+}

@@ -1,0 +1,19 @@
+{
+    "name": "Uutiset",
+    "description": "Uutissyöte: kirjoita uutisia kuvineen ja tunnisteineen. Uusimmat näkyvät etusivulla.",
+    "version": "1.0.0",
+    "timeout": 10,
+    "enabled": false,
+    "storage": true,
+    "max_input_kb": 4096,
+    "assets": ["assets/news.css", "assets/news.js"],
+    "widgets": [
+        {
+            "name": "latest",
+            "title": "Uusimmat uutiset",
+            "type": "feed",
+            "hook": "dashboard.after_counts",
+            "input": { "action": "feed", "limit": 5 }
+        }
+    ]
+}
