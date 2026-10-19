@@ -7,11 +7,13 @@ in the database as data, so deleting a news item deletes its images too.
 
 import base64
 import os
+import re
 import sqlite3
+import unicodedata
 from contextlib import contextmanager
 from datetime import datetime, timezone
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 SCHEMA = """
 CREATE TABLE news (
@@ -43,9 +45,41 @@ CREATE TABLE news_media (
 CREATE INDEX news_media_news ON news_media (news_id, position);
 """
 
-# Changes to the schema after the first version, by the version they lead to.
+MAX_SLUG = 80
+
+
+def slugify(title):
+    """A news item's address from its title: "Syyshuollot alkavat!" →
+    "syyshuollot-alkavat". Never only digits, which would look like an id."""
+    text = title.lower().translate(str.maketrans({"ä": "a", "ö": "o", "å": "a"}))
+    text = unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode("ascii")
+    slug = re.sub(r"[^a-z0-9]+", "-", text).strip("-")[:MAX_SLUG].rstrip("-") or "uutinen"
+    return f"uutinen-{slug}" if slug.isdigit() else slug
+
+
+def unique_slug(db, title):
+    """slugify(title), with -2, -3… when another news item has it."""
+    base = slugify(title)
+    slug, number = base, 1
+    while db.execute("SELECT 1 FROM news WHERE slug = ?", (slug,)).fetchone():
+        number += 1
+        slug = f"{base}-{number}"
+    return slug
+
+
+def add_slugs(db):
+    """Gives the news that were saved before slugs one from their title, oldest first."""
+    db.execute("ALTER TABLE news ADD COLUMN slug TEXT")
+    for news_id, title in db.execute("SELECT id, title FROM news ORDER BY id").fetchall():
+        db.execute("UPDATE news SET slug = ? WHERE id = ?", (unique_slug(db, title), news_id))
+    db.execute("CREATE UNIQUE INDEX news_slug ON news (slug)")
+
+
+# Changes to the schema after the first version, by the version they lead to:
+# SQL, or a function that gets the database.
 MIGRATIONS = {
     2: "ALTER TABLE news ADD COLUMN updated_at TEXT",
+    3: add_slugs,
 }
 
 
@@ -77,7 +111,8 @@ class NewsStore:
                     if statement.strip():
                         self.db.execute(statement)
             for target in range(max(version, 1) + 1, SCHEMA_VERSION + 1):
-                self.db.execute(MIGRATIONS[target])
+                migration = MIGRATIONS[target]
+                migration(self.db) if callable(migration) else self.db.execute(migration)
             if version < SCHEMA_VERSION:
                 self.db.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
             if version < 1 and seed:
@@ -102,11 +137,12 @@ class NewsStore:
 
     def create(self, title, short_description, content, tags, media, created_at=None):
         """Saves a news item and returns its id. media: dicts with mime, data,
-        thumbnail_mime, thumbnail and alt."""
+        thumbnail_mime, thumbnail and alt. Its slug comes from the title and
+        stays when the title changes, so links to it keep working."""
         with self.transaction():
             news_id = self.db.execute(
-                "INSERT INTO news (title, short_description, content, created_at) VALUES (?, ?, ?, ?)",
-                (title, short_description, content, created_at or now()),
+                "INSERT INTO news (title, slug, short_description, content, created_at) VALUES (?, ?, ?, ?, ?)",
+                (title, unique_slug(self.db, title), short_description, content, created_at or now()),
             ).lastrowid
             self.db.executemany(
                 "INSERT INTO news_tags (news_id, tag) VALUES (?, ?)",
@@ -163,15 +199,17 @@ class NewsStore:
         with self.transaction():
             return self.db.execute("DELETE FROM news WHERE id = ?", (news_id,)).rowcount > 0
 
-    def find(self, news_id):
-        """A news item with its content and full-size images, or None."""
-        row = self.db.execute("SELECT * FROM news WHERE id = ?", (news_id,)).fetchone()
+    def find(self, key):
+        """A news item with its content and full-size images, by its id (a
+        number) or slug (a text), or None."""
+        column = "id" if isinstance(key, int) else "slug"
+        row = self.db.execute(f"SELECT * FROM news WHERE {column} = ?", (key,)).fetchone()
         if row is None:
             return None
 
         media = self.db.execute(
             "SELECT id, mime, data, thumbnail_mime, thumbnail, alt FROM news_media WHERE news_id = ? ORDER BY position",
-            (news_id,),
+            (row["id"],),
         ).fetchall()
 
         return {
@@ -216,6 +254,7 @@ class NewsStore:
 
         return {
             "id": row["id"],
+            "slug": row["slug"],
             "title": row["title"],
             "short_description": row["short_description"],
             "tags": tags,

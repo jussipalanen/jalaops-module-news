@@ -133,12 +133,12 @@
         h('div', { class: 'news-card-body' },
           h('p', { class: 'news-meta' }, time(item.created_at),
             item.media_count > 1 ? h('span', null, ' · ' + item.media_count + ' kuvaa') : null),
-          h('h3', null, h('button', { type: 'button', class: 'news-open', onclick: function () { go({ news: item.id }) } }, item.title)),
+          h('h3', null, h('button', { type: 'button', class: 'news-open', onclick: function () { go({ news: address(item) }) } }, item.title)),
           h('p', { class: 'news-summary' }, item.short_description),
           tagList(item.tags, function (next) { go({ tag: next }) })),
         // Beside the body, so on a phone the buttons can use the card's whole width.
         h('div', { class: 'news-card-actions' },
-          h('button', { type: 'button', class: 'news-small', 'aria-label': 'Muokkaa: ' + item.title, onclick: function () { go({ news: item.id, view: 'edit' }) } }, 'Muokkaa'),
+          h('button', { type: 'button', class: 'news-small', 'aria-label': 'Muokkaa: ' + item.title, onclick: function () { go({ news: address(item), view: 'edit' }) } }, 'Muokkaa'),
           // Deleted from the list, the list is drawn again for the same address.
           deleteButton(item, true, function () { render(params) }))))
     }))
@@ -181,13 +181,31 @@
 
   // ---- One news item ---------------------------------------------------
 
-  async function loadNews(id) {
-    if (!cache.news[id]) cache.news[id] = (await run({ action: 'get', id: Number(id) })).news
-    return cache.news[id]
+  // A news item's part of the page address: its slug (/news/syyshuollot-alkavat).
+  // Older addresses have its id (?news=3), which still works.
+  function address(news) {
+    return news.slug || String(news.id)
   }
 
-  async function renderNews(id) {
-    var news = await loadNews(id)
+  async function loadNews(key) {
+    if (!cache.news[key]) {
+      var news = (await run(/^\d+$/.test(key) ? { action: 'get', id: Number(key) } : { action: 'get', slug: key })).news
+      cache.news[key] = cache.news[address(news)] = news
+    }
+    return cache.news[key]
+  }
+
+  // An item opened by its id (/news/3) gets its slug in the address
+  // (/news/syyshuollot-alkavat) without a new history entry.
+  function useSlug(news) {
+    if (params.news !== address(news) && window.jalaops.navigate) {
+      var next = Object.assign({}, params, { news: address(news) })
+      window.jalaops.navigate(next, { replace: true })
+    }
+  }
+
+  async function renderNews(key) {
+    var news = await loadNews(key)
 
     var content = h('div', { class: 'news-content' })
     content.innerHTML = news.content
@@ -202,7 +220,7 @@
       h('p', { class: 'news-lead' }, news.short_description),
       content,
       h('div', { class: 'news-manage' },
-        h('button', { type: 'button', class: 'news-secondary', onclick: function () { go({ news: news.id, view: 'edit' }) } }, 'Muokkaa'),
+        h('button', { type: 'button', class: 'news-secondary', onclick: function () { go({ news: address(news), view: 'edit' }) } }, 'Muokkaa'),
         deleteButton(news)))
   }
 
@@ -423,7 +441,7 @@
 
     var saveLabel = editing ? 'Tallenna muutokset' : 'Julkaise uutinen'
     var save = h('button', { type: 'submit' }, saveLabel)
-    var back = editing ? { news: news.id } : {}
+    var back = editing ? { news: address(news) } : {}
     var backLabel = editing ? '← Takaisin uutiseen' : '← Kaikki uutiset'
 
     var form = h('form', { class: 'stack', novalidate: true },
@@ -482,8 +500,8 @@
       try {
         var saved = (await run(input)).news
         cache = { lists: {}, news: {} }
-        cache.news[saved.id] = saved
-        go({ news: saved.id })
+        cache.news[address(saved)] = saved
+        go({ news: address(saved) })
       } catch (exception) {
         showError(exception.message)
         save.disabled = false
@@ -580,6 +598,12 @@
 
   var drawing = 0
 
+  // The browser tab's title and the page's description (JalaOps 1.12.0 and
+  // later; older versions keep the module's name).
+  function setPage(info) {
+    if (window.jalaops.setPage) window.jalaops.setPage(info)
+  }
+
   async function render(next) {
     params = next || {}
     var current = ++drawing
@@ -588,14 +612,28 @@
 
     try {
       var page
-      if (params.view === 'new') page = renderForm()
-      else if (params.news && params.view === 'edit') page = renderForm(await loadNews(params.news))
-      else if (params.news) page = await renderNews(params.news)
-      else page = await renderList(params.tag)
+      var info = {}
+      if (params.view === 'new') {
+        page = renderForm()
+        info = { title: 'Uusi uutinen' }
+      } else if (params.news && params.view === 'edit') {
+        var editing = await loadNews(params.news)
+        page = renderForm(editing)
+        info = { title: 'Muokkaa: ' + editing.title, news: editing }
+      } else if (params.news) {
+        var news = await loadNews(params.news)
+        page = await renderNews(params.news)
+        info = { title: news.title, description: news.short_description, news: news }
+      } else {
+        page = await renderList(params.tag)
+        info = params.tag ? { title: 'Uutiset #' + params.tag } : {}
+      }
 
       // A newer page was asked for while this one was loading.
       if (current !== drawing) return
       root.replaceChildren(page)
+      setPage({ title: info.title, description: info.description })
+      if (info.news) useSlug(info.news)
     } catch (exception) {
       if (current !== drawing) return
       root.replaceChildren(h('div', null, h('button', { type: 'button', class: 'news-back', onclick: function () { go({}) } }, '← Kaikki uutiset')))

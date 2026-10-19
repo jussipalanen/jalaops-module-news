@@ -186,7 +186,8 @@ class ModuleTest(unittest.TestCase):
 
         db = sqlite3.connect(os.path.join(self.data_dir, "news.sqlite3"))
         db.executescript(SCHEMA)
-        db.execute("INSERT INTO news (title, short_description, content, created_at) VALUES ('Vanha', 'S', '<p>C</p>', '2026-01-01T00:00:00Z')")
+        for _ in range(2):
+            db.execute("INSERT INTO news (title, short_description, content, created_at) VALUES ('Vanha', 'S', '<p>C</p>', '2026-01-01T00:00:00Z')")
         db.execute("PRAGMA user_version = 1")
         db.commit()
         db.close()
@@ -195,8 +196,39 @@ class ModuleTest(unittest.TestCase):
 
         self.assertIsNone(error)
         # Upgrading doesn't add the demo news to an existing database.
-        self.assertEqual([item["title"] for item in output["items"]], ["Vanha"])
+        self.assertEqual([item["title"] for item in output["items"]], ["Vanha", "Vanha"])
         self.assertIsNone(output["items"][0]["updated_at"])
+        # The news get slugs, the older one first.
+        self.assertEqual([item["slug"] for item in output["items"]], ["vanha-2", "vanha"])
+
+    def test_news_have_slugs_for_their_addresses(self):
+        for title, slug in [
+            ("Kevätsiivous alkaa!", "kevatsiivous-alkaa"),
+            ("Kevätsiivous alkaa", "kevatsiivous-alkaa-2"),
+            ("Ääkköset ja öljy – Åland", "aakkoset-ja-oljy-aland"),
+            ("Café #1", "cafe-1"),
+            ("2026", "uutinen-2026"),
+            ("!!!", "uutinen"),
+            ("x" * 150, "x" * 80),
+        ]:
+            with self.subTest(title=title):
+                created, error = self.create(title=title)
+                self.assertIsNone(error)
+                self.assertEqual(created["news"]["slug"], slug)
+
+        shown, _ = run(self.data_dir, {"action": "get", "slug": "kevatsiivous-alkaa-2"})
+        self.assertEqual(shown["news"]["title"], "Kevätsiivous alkaa")
+
+        # Editing the title keeps the slug, so links keep working.
+        news = shown["news"]
+        run(self.data_dir, {"action": "update", "id": news["id"], "title": "Uusi otsikko", "short_description": "S", "content": "C"})
+        shown, _ = run(self.data_dir, {"action": "get", "slug": "kevatsiivous-alkaa-2"})
+        self.assertEqual(shown["news"]["title"], "Uusi otsikko")
+
+        self.assertEqual(run(self.data_dir, {"action": "get", "slug": "ei-ole"})[1], "Uutista ei löytynyt. Se on ehkä poistettu.")
+        for slug in ["Iso", "a b", "-a", "a--b", 3, ""]:
+            with self.subTest(slug=slug):
+                self.assertEqual(run(self.data_dir, {"action": "get", "slug": slug})[1], "Uutisen osoite on virheellinen.")
 
     def test_the_feed_is_in_the_dashboard_format(self):
         created, _ = self.create(title="Tuorein")
@@ -206,7 +238,7 @@ class ModuleTest(unittest.TestCase):
         self.assertEqual(len(output["items"]), 2)
         self.assertEqual(output["items"][0]["title"], "Tuorein")
         self.assertEqual(output["items"][0]["text"], "Lyhyesti")
-        self.assertEqual(output["items"][0]["params"], {"news": str(created["news"]["id"])})
+        self.assertEqual(output["items"][0]["params"], {"news": "tuorein"})
         self.assertIsNone(output["items"][0]["image"])
         self.assertRegex(output["items"][0]["date"], r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$")
 

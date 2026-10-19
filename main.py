@@ -5,8 +5,8 @@ from stdout. The input's "action" says what to do:
 
     {"action": "list", "tag": "huolto", "limit": 20, "offset": 0}
         → {"items": [...], "total": 3, "tags": [{"tag": "huolto", "count": 1}]}
-    {"action": "get", "id": 3}
-        → {"news": {"id": 3, "title": ..., "content": "<p>…</p>", "media": [...]}}
+    {"action": "get", "id": 3} or {"action": "get", "slug": "syyshuollot-alkavat"}
+        → {"news": {"id": 3, "slug": "syyshuollot-alkavat", "title": ..., "content": "<p>…</p>", "media": [...]}}
     {"action": "create", "title": ..., "short_description": ..., "content": "<p>…</p>",
      "tags": ["huolto"], "media": [{"image": "data:image/jpeg;base64,…", "thumbnail": "data:…", "alt": ""}]}
         → {"news": {...}}
@@ -16,7 +16,7 @@ from stdout. The input's "action" says what to do:
     {"action": "delete", "id": 3}
         → {"deleted": 3}
     {"action": "feed", "limit": 5}
-        → {"items": [{"title": ..., "text": ..., "date": ..., "image": ..., "params": {"news": "3"}}]}
+        → {"items": [{"title": ..., "text": ..., "date": ..., "image": ..., "params": {"news": "syyshuollot-alkavat"}}]}
 
 "feed" is the JalaOps dashboard's format ("dashboard" in module.json). The
 news are kept in an SQLite database in the folder JALAOPS_DATA_DIR.
@@ -28,6 +28,7 @@ import base64
 import binascii
 import json
 import os
+import re
 import sys
 
 import demo
@@ -83,6 +84,16 @@ def whole_number(data, name, default, minimum, maximum):
     if not isinstance(value, int) or isinstance(value, bool) or not minimum <= value <= maximum:
         raise InputError(f"{name}: anna kokonaisluku {minimum}–{maximum}.")
     return value
+
+
+def news_key(data):
+    """The news item to get: its "slug" from a page address, or its "id"."""
+    slug = data.get("slug")
+    if slug is None:
+        return news_id(data)
+    if not isinstance(slug, str) or not re.fullmatch(r"[a-z0-9]+(-[a-z0-9]+)*", slug) or len(slug) > 100:
+        raise InputError("Uutisen osoite on virheellinen.")
+    return slug
 
 
 def news_id(data):
@@ -194,7 +205,7 @@ def list_news(store, data):
 
 
 def get_news(store, data):
-    news = store.find(news_id(data))
+    news = store.find(news_key(data))
     if news is None:
         raise InputError("Uutista ei löytynyt. Se on ehkä poistettu.")
     # Sanitized again, in case the allowlist has been tightened since it was saved.
@@ -252,7 +263,7 @@ def feed(store, data):
                 "date": item["created_at"],
                 "image": item["thumbnail"],
                 "tags": item["tags"],
-                "params": {"news": str(item["id"])},
+                "params": {"news": item["slug"]},
             }
             for item in items
         ]
