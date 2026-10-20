@@ -14,9 +14,18 @@ jobs:
         python: ['3.13', '3.14']
     steps:
       - uses: actions/checkout@v5
+      # The module SDK (jalaops_module) comes with JalaOps, which puts it on
+      # the module's PYTHONPATH; the tests get it from the JalaOps repository.
+      - uses: actions/checkout@v5
+        with:
+          repository: jussipalanen/jalaops
+          path: jalaops
+          sparse-checkout: backend/modules/sdk
       - uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python }}
       - run: python -m unittest -v
+        env:
+          PYTHONPATH: ${{ github.workspace }}/jalaops/backend/modules/sdk
       - name: Check module.json
         run: python -c "import json; json.load(open('module.json')); json.load(open('composer.json'))"

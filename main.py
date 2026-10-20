@@ -18,18 +18,23 @@ from stdout. The input's "action" says what to do:
     {"action": "feed", "limit": 5}
         → {"items": [{"title": ..., "text": ..., "date": ..., "image": ..., "params": {"news": "syyshuollot-alkavat"}}]}
 
-"feed" is the JalaOps dashboard's format ("dashboard" in module.json). The
+"feed" is the JalaOps dashboard's format ("widgets" in module.json). The
 news are kept in an SQLite database in the folder JALAOPS_DATA_DIR.
 
-Try it: JALAOPS_DATA_DIR=/tmp/news python3 main.py <<< '{"action": "list"}'
+The module is a class that uses the JalaOps module SDK (jalaops_module,
+JalaOps 1.15.0 or later), which JalaOps puts on the module's PYTHONPATH: each
+action is a method, and an InputError is the Finnish message users see.
+
+Try it, with the SDK from a JalaOps checkout next to this one:
+    PYTHONPATH=../jalaops/backend/modules/sdk JALAOPS_DATA_DIR=/tmp/news python3 main.py <<< '{"action": "list"}'
 """
 
 import base64
 import binascii
-import json
 import os
 import re
-import sys
+
+from jalaops_module import InputError, Module, action, feed_item
 
 import demo
 from news_html import paragraphs, plain_text, sanitize
@@ -54,16 +59,6 @@ IMAGE_TYPES = {
 }
 
 
-class InputError(Exception):
-    """A problem with the input; the message is shown to the user in Finnish."""
-
-
-def fail(message):
-    """Ends with an error; the app shows the message to the user."""
-    print(message, file=sys.stderr)
-    sys.exit(1)
-
-
 def text(data, name, label, maximum, required=True):
     value = data.get(name)
     # An optional text can also be left out or null.
@@ -79,9 +74,9 @@ def text(data, name, label, maximum, required=True):
     return value
 
 
-def whole_number(data, name, default, minimum, maximum):
-    value = data.get(name, default)
-    if not isinstance(value, int) or isinstance(value, bool) or not minimum <= value <= maximum:
+def in_range(value, name, minimum, maximum):
+    """A whole number (checked by the type hint) between minimum and maximum."""
+    if not minimum <= value <= maximum:
         raise InputError(f"{name}: anna kokonaisluku {minimum}–{maximum}.")
     return value
 
@@ -191,28 +186,6 @@ def media_list(value, existing=False):
     return media
 
 
-def list_news(store, data):
-    tag = data.get("tag")
-    if tag is not None and not isinstance(tag, str):
-        raise InputError("Tunniste: anna tekstiä.")
-
-    items, total = store.newest(
-        whole_number(data, "limit", 20, 1, 50),
-        whole_number(data, "offset", 0, 0, 1_000_000),
-        tag.strip().lower() if tag else None,
-    )
-    return {"items": items, "total": total, "tags": store.tags()}
-
-
-def get_news(store, data):
-    news = store.find(news_key(data))
-    if news is None:
-        raise InputError("Uutista ei löytynyt. Se on ehkä poistettu.")
-    # Sanitized again, in case the allowlist has been tightened since it was saved.
-    news["content"] = sanitize(news["content"])
-    return {"news": news}
-
-
 def news_fields(data):
     """The title, short description and content of a news item from the input."""
     title = text(data, "title", "Otsikko", MAX_TITLE)
@@ -224,98 +197,97 @@ def news_fields(data):
     return title, short_description, content
 
 
-def create_news(store, data):
-    news_id = store.create(*news_fields(data), tag_list(data.get("tags")), media_list(data.get("media")))
-    return {"news": store.find(news_id)}
+class NewsFeedModule(Module):
+    """The news feed. Each action opens the database in the data folder."""
 
+    _store = None
 
-def update_news(store, data):
-    news_id_ = news_id(data)
-    fields = news_fields(data)
-    tags = tag_list(data.get("tags"))
-    media = media_list(data.get("media"), existing=True)
+    @property
+    def store(self):
+        if self._store is None:
+            if not os.environ.get("JALAOPS_DATA_DIR"):
+                raise InputError("Moduulilla ei ole tallennuskansiota (JALAOPS_DATA_DIR).")
+            self._store = NewsStore(str(self.data_dir), seed=demo.seed)
+        return self._store
 
-    try:
-        updated = store.update(news_id_, *fields, tags, media)
-    except ValueError:
-        raise InputError("Kuvaa ei löytynyt. Lataa sivu uudelleen ja yritä uudestaan.") from None
+    def handle(self, data):
+        try:
+            return super().handle(data)
+        finally:
+            if self._store is not None:
+                self._store.close()
+                self._store = None
 
-    if not updated:
-        raise InputError("Uutista ei löytynyt. Se on ehkä poistettu.")
-    return {"news": store.find(news_id_)}
+    @action("list", default=True, labels={"tag": "Tunniste"})
+    def list_news(self, tag: str | None = None, limit: int = 20, offset: int = 0):
+        items, total = self.store.newest(
+            in_range(limit, "limit", 1, 50),
+            in_range(offset, "offset", 0, 1_000_000),
+            tag.strip().lower() if tag else None,
+        )
+        return {"items": items, "total": total, "tags": self.store.tags()}
 
+    # The id may come from a page address as text, so get, update and delete
+    # check their input with the functions above.
+    @action("get")
+    def get_news(self, **data):
+        news = self.store.find(news_key(data))
+        if news is None:
+            raise InputError("Uutista ei löytynyt. Se on ehkä poistettu.")
+        # Sanitized again, in case the allowlist has been tightened since it was saved.
+        news["content"] = sanitize(news["content"])
+        return {"news": news}
 
-def delete_news(store, data):
-    news_id_ = news_id(data)
-    if not store.delete(news_id_):
-        raise InputError("Uutista ei löytynyt. Se on ehkä jo poistettu.")
-    return {"deleted": news_id_}
+    @action("create")
+    def create_news(self, **data):
+        news_id_ = self.store.create(*news_fields(data), tag_list(data.get("tags")), media_list(data.get("media")))
+        return {"news": self.store.find(news_id_)}
 
+    @action("update")
+    def update_news(self, **data):
+        news_id_ = news_id(data)
+        fields = news_fields(data)
+        tags = tag_list(data.get("tags"))
+        media = media_list(data.get("media"), existing=True)
 
-def feed(store, data):
-    """The newest news in the JalaOps dashboard's format."""
-    items, _ = store.newest(whole_number(data, "limit", 5, 1, 10))
-    return {
-        "items": [
-            {
-                "title": item["title"],
-                "text": item["short_description"],
-                "date": item["created_at"],
-                "image": item["thumbnail"],
-                "tags": item["tags"],
-                "params": {"news": item["slug"]},
-            }
-            for item in items
-        ]
-    }
+        try:
+            updated = self.store.update(news_id_, *fields, tags, media)
+        except ValueError:
+            raise InputError("Kuvaa ei löytynyt. Lataa sivu uudelleen ja yritä uudestaan.") from None
 
+        if not updated:
+            raise InputError("Uutista ei löytynyt. Se on ehkä poistettu.")
+        return {"news": self.store.find(news_id_)}
 
-ACTIONS = {
-    "list": list_news,
-    "get": get_news,
-    "create": create_news,
-    "update": update_news,
-    "delete": delete_news,
-    "feed": feed,
-    "tags": lambda store, data: {"tags": store.tags()},
-}
+    @action("delete")
+    def delete_news(self, **data):
+        news_id_ = news_id(data)
+        if not self.store.delete(news_id_):
+            raise InputError("Uutista ei löytynyt. Se on ehkä jo poistettu.")
+        return {"deleted": news_id_}
 
+    @action("feed")
+    def feed(self, limit: int = 5):
+        """The newest news in the JalaOps dashboard's format."""
+        items, _ = self.store.newest(in_range(limit, "limit", 1, 10))
+        return {
+            "items": [
+                feed_item(
+                    item["title"],
+                    text=item["short_description"],
+                    date=item["created_at"],
+                    image=item["thumbnail"],
+                    tags=item["tags"],
+                    params={"news": item["slug"]},
+                )
+                for item in items
+            ]
+        }
 
-def handle(store, data):
-    """The output for an input object. Raises InputError for bad input."""
-    if not isinstance(data, dict):
-        raise InputError("Syötteen pitää olla JSON-objekti.")
-
-    action = ACTIONS.get(data.get("action", "list"))
-    if action is None:
-        raise InputError(f"Tuntematon toiminto. Sallitut: {', '.join(ACTIONS)}.")
-    return action(store, data)
-
-
-def open_store():
-    directory = os.environ.get("JALAOPS_DATA_DIR")
-    if not directory:
-        fail("Moduulilla ei ole tallennuskansiota (JALAOPS_DATA_DIR).")
-
-    return NewsStore(directory, seed=demo.seed)
-
-
-def main():
-    try:
-        data = json.load(sys.stdin)
-    except json.JSONDecodeError:
-        fail("Syöte ei ole kelvollista JSONia.")
-
-    store = open_store()
-    try:
-        output = handle(store, data)
-    except InputError as error:
-        fail(str(error))
-    finally:
-        store.close()
-
-    json.dump(output, sys.stdout, ensure_ascii=False)
+    @action("tags")
+    def tags(self):
+        return {"tags": self.store.tags()}
 
 
 if __name__ == "__main__":
-    main()
+    NewsFeedModule.main()

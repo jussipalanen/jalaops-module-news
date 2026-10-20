@@ -1,4 +1,6 @@
-"""Tests for the news module. Run them with: python3 -m unittest"""
+"""Tests for the news module. Run them with the JalaOps module SDK on the path:
+PYTHONPATH=../jalaops/backend/modules/sdk python3 -m unittest
+"""
 
 import base64
 import json
@@ -15,19 +17,22 @@ sys.path.insert(0, str(ROOT))
 import demo  # noqa: E402
 from news_html import paragraphs, plain_text, sanitize  # noqa: E402
 
+SDK = os.environ.get("PYTHONPATH", "")
+
 PNG = demo.gradient_png(4, 3, (255, 0, 0), (0, 0, 255))
 PNG_URL = "data:image/png;base64," + base64.b64encode(PNG).decode()
 
 
 def run(data_dir, payload):
-    """Runs main.py the way JalaOps does: JSON in on stdin, out on stdout."""
+    """Runs main.py the way JalaOps does: JSON in on stdin, out on stdout, and
+    only these variables (PYTHONPATH has the module SDK)."""
     result = subprocess.run(
-        [sys.executable, "-E", "-s", "-B", "-X", "utf8", "main.py"],
+        [sys.executable, "-s", "-B", "-X", "utf8", "main.py"],
         input=json.dumps(payload),
         capture_output=True,
         text=True,
         cwd=ROOT,
-        env={"PATH": os.environ.get("PATH", ""), "LANG": "C.UTF-8", "JALAOPS_DATA_DIR": data_dir},
+        env={"PATH": os.environ.get("PATH", ""), "LANG": "C.UTF-8", "PYTHONPATH": SDK, "JALAOPS_DATA_DIR": data_dir},
         timeout=20,
     )
     if result.returncode != 0:
@@ -239,7 +244,7 @@ class ModuleTest(unittest.TestCase):
         self.assertEqual(output["items"][0]["title"], "Tuorein")
         self.assertEqual(output["items"][0]["text"], "Lyhyesti")
         self.assertEqual(output["items"][0]["params"], {"news": "tuorein"})
-        self.assertIsNone(output["items"][0]["image"])
+        self.assertNotIn("image", output["items"][0])
         self.assertRegex(output["items"][0]["date"], r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$")
 
     def test_it_checks_the_input(self):
@@ -260,14 +265,17 @@ class ModuleTest(unittest.TestCase):
             with self.subTest(fields=str(fields)[:60]):
                 self.assertEqual(self.create(**fields), (None, message))
 
-        self.assertEqual(run(self.data_dir, {"action": "publish"})[1], "Tuntematon toiminto. Sallitut: list, get, create, update, delete, feed, tags.")
+        self.assertEqual(run(self.data_dir, {"action": "publish"})[1], "Tuntematon toiminto: publish. Sallitut: list, get, create, update, delete, feed, tags.")
         self.assertEqual(run(self.data_dir, {"action": "get", "id": True})[1], "Uutisen tunniste puuttuu tai on virheellinen.")
         self.assertEqual(run(self.data_dir, {"action": "list", "limit": 500})[1], "limit: anna kokonaisluku 1–50.")
+        self.assertEqual(run(self.data_dir, {"action": "list", "limit": "5"})[1], "limit: anna kokonaisluku.")
+        self.assertEqual(run(self.data_dir, {"action": "list", "tag": 5})[1], "Tunniste: anna tekstiä.")
+        self.assertEqual(run(self.data_dir, {"action": "feed", "limit": 11})[1], "limit: anna kokonaisluku 1–10.")
 
     def test_it_needs_a_data_folder(self):
         result = subprocess.run(
             [sys.executable, "main.py"], input="{}", capture_output=True, text=True, cwd=ROOT,
-            env={"PATH": os.environ.get("PATH", "")},
+            env={"PATH": os.environ.get("PATH", ""), "PYTHONPATH": SDK},
         )
         self.assertEqual(result.returncode, 1)
         self.assertEqual(result.stderr.strip(), "Moduulilla ei ole tallennuskansiota (JALAOPS_DATA_DIR).")
