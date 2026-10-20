@@ -2,7 +2,9 @@
 
 A [JalaOps](https://github.com/jussipalanen/jalaops) Python module as a Composer package: a news feed. Users write news with a title, a short description, HTML content, tags and images, read them in a list or one by one, and edit and delete them. The newest news show on the JalaOps dashboard.
 
-The module needs JalaOps 1.11.0 or later: it uses the module data folder (`"storage": true`), a larger input for images (`"max_input_kb"`), page addresses (`jalaops.params`, `jalaops.navigate`) and a dashboard widget (`"widgets"`). With JalaOps 1.12.0 or later, its pages have addresses of their own (`/news`, `/news/<slug>`, from `"routes"`), and a news item's page has the item's title in the browser tab (`jalaops.setPage`). Older versions ignore these and use `/tools/modules/news`.
+Version 2 is a class that uses the JalaOps module SDK (`class NewsFeedModule(Module)`, its actions are methods), so it needs **JalaOps 1.15.0 or later**. Version 1 works with JalaOps 1.11.0–1.14.x.
+
+The module uses it uses the module data folder (`"storage": true`), a larger input for images (`"max_input_kb"`), page addresses (`jalaops.params`, `jalaops.navigate`) and a dashboard widget (`"widgets"`). With JalaOps 1.12.0 or later, its pages have addresses of their own (`/news`, `/news/<slug>`, from `"routes"`), and a news item's page has the item's title in the browser tab (`jalaops.setPage`). Older versions ignore these and use `/tools/modules/news`.
 
 The module comes off, like every optional module: turn it on with its switch in **Työkalut → Moduulit**, or `./dev artisan modules:enable news`.
 
@@ -10,7 +12,7 @@ The module comes off, like every optional module: turn it on with its switch in 
 
 ```bash
 ./dev composer config repositories.jalaops-module-news vcs https://github.com/jussipalanen/jalaops-module-news.git
-./dev composer require jalaops/news:^1.0
+./dev composer require jalaops/news:^2.0
 ./dev artisan modules:list
 ```
 
@@ -55,10 +57,15 @@ The news are in an SQLite database, `news.sqlite3`, in the folder JalaOps gives 
 
 ## Develop
 
+The module imports the SDK, `jalaops_module`, which JalaOps puts on its `PYTHONPATH`. To run it on its own, put the SDK from a JalaOps checkout next to this one on the path:
+
 ```bash
+export PYTHONPATH=../jalaops/backend/modules/sdk
 python3 -m unittest                                       # tests
 JALAOPS_DATA_DIR=/tmp/news python3 main.py <<< '{"action": "list", "limit": 2}'
 ```
+
+CI gets the SDK from the JalaOps repository.
 
 Release a new version by tagging it (`git tag -a v1.1.0 -m 1.1.0 && git push --tags`); JalaOps picks it up with `composer update jalaops/news`.
 
